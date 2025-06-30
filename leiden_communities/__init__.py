@@ -82,6 +82,14 @@ try:
     # Automatically set threads to use all available CPUs unless OMP_NUM_THREADS is set
     if "OMP_NUM_THREADS" not in os.environ:
         set_num_threads()
+    else:
+        try:
+            # Try to read the environment variable and set threads accordingly
+            num_threads = int(os.environ["OMP_NUM_THREADS"])
+            set_num_threads(num_threads)
+        except ValueError:
+            # If the value is not a valid integer, fall back to all CPUs
+            set_num_threads()
 
 except ImportError as e:
     # Module not built yet - provide informative error messages

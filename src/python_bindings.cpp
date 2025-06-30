@@ -10,6 +10,7 @@
 // Include the main header files from the project
 #include "main.hxx"
 #include "properties.hxx"
+#include "update.hxx"
 #include "_openmp.hxx"
 
 namespace py = pybind11;
@@ -55,33 +56,70 @@ G create_graph_from_arrays(
 
     // Find the maximum vertex ID to determine graph span
     uint32_t max_vertex = 0;
+    #ifdef OPENMP
+    #pragma omp parallel for schedule(dynamic, 2048) reduction(max:max_vertex)
+    #endif
     for (py::ssize_t i = 0; i < src_buf.size; ++i) {
         max_vertex = std::max(max_vertex, std::max(src_ptr[i], tgt_ptr[i]));
     }
 
     G graph;
-    graph.respan(max_vertex + 1);
+    using K = typename G::key_type;
+    using V_type = typename G::vertex_value_type;
+    using E = typename G::edge_value_type;
 
-    // Add vertices
-    for (uint32_t u = 0; u <= max_vertex; ++u) {
-        graph.addVertex(u);
+    // Use the same pattern as readMtxIfOmpW: add vertices first, then edges in parallel
+    auto fv = [](auto u, auto d) { return true; };
+    addVerticesIfU(graph, K(0), K(max_vertex + 1), V_type(), fv);
+
+#ifdef OPENMP
+    // Process edges in batches similar to readMtxDoOmp
+    const py::ssize_t BATCH_SIZE = 131072;
+    py::ssize_t total_edges = src_buf.size;
+
+    for (py::ssize_t batch_start = 0; batch_start < total_edges; batch_start += BATCH_SIZE) {
+        py::ssize_t batch_end = std::min(batch_start + BATCH_SIZE, total_edges);
+        py::ssize_t batch_size = batch_end - batch_start;
+
+        // Process this batch in parallel
+        #pragma omp parallel
+        {
+            // Each thread processes edges from this batch
+            for (py::ssize_t i = batch_start; i < batch_end; ++i) {
+                uint32_t u = src_ptr[i];
+                uint32_t v = tgt_ptr[i];
+                double w = has_weights ? weight_ptr[i] : 1.0;
+
+                // Use addEdgeOmpU for thread-safe edge addition
+                addEdgeOmpU(graph, K(u), K(v), E(w));
+
+                // Add reverse edge for undirected graphs
+                if (!directed && u != v) {
+                    addEdgeOmpU(graph, K(v), K(u), E(w));
+                }
+            }
+        }
     }
 
-    // Add edges
+    // Use updateOmpU for thread-safe graph update
+    updateOmpU(graph);
+#else
+    // Fallback to sequential processing when OpenMP is not available
     for (py::ssize_t i = 0; i < src_buf.size; ++i) {
         uint32_t u = src_ptr[i];
         uint32_t v = tgt_ptr[i];
         double w = has_weights ? weight_ptr[i] : 1.0;
 
-        graph.addEdge(u, v, static_cast<V>(w));
+        graph.addEdge(K(u), K(v), E(w));
 
         // Add reverse edge for undirected graphs
         if (!directed && u != v) {
-            graph.addEdge(v, u, static_cast<V>(w));
+            graph.addEdge(K(v), K(u), E(w));
         }
     }
 
     graph.update();
+#endif
     return graph;
 }
 
@@ -97,6 +135,7 @@ py::dict louvain_result_to_dict(const LouvainResult<K, W>& result) {
     auto membership_buf = membership_array.request();
     auto membership_ptr = static_cast<uint32_t*>(membership_buf.ptr);
 
+    #pragma omp parallel for schedule(dynamic, 2048)
     for (size_t i = 0; i < n_vertices; ++i) {
         membership_ptr[i] = result.membership[i];
     }
@@ -106,6 +145,7 @@ py::dict louvain_result_to_dict(const LouvainResult<K, W>& result) {
     auto vertex_weights_buf = vertex_weights_array.request();
     auto vertex_weights_ptr = static_cast<double*>(vertex_weights_buf.ptr);
 
+    #pragma omp parallel for schedule(dynamic, 2048)
     for (size_t i = 0; i < n_vertices; ++i) {
         vertex_weights_ptr[i] = result.vertexWeight[i];
     }
@@ -116,6 +156,7 @@ py::dict louvain_result_to_dict(const LouvainResult<K, W>& result) {
     auto community_weights_buf = community_weights_array.request();
     auto community_weights_ptr = static_cast<double*>(community_weights_buf.ptr);
 
+    #pragma omp parallel for schedule(dynamic, 2048)
     for (size_t i = 0; i < n_communities; ++i) {
         community_weights_ptr[i] = result.communityWeight[i];
     }
@@ -148,6 +189,7 @@ py::dict leiden_result_to_dict(const LeidenResult<K, W>& result) {
     auto membership_buf = membership_array.request();
     auto membership_ptr = static_cast<uint32_t*>(membership_buf.ptr);
 
+    #pragma omp parallel for schedule(dynamic, 2048)
     for (size_t i = 0; i < n_vertices; ++i) {
         membership_ptr[i] = result.membership[i];
     }
@@ -157,6 +199,7 @@ py::dict leiden_result_to_dict(const LeidenResult<K, W>& result) {
     auto vertex_weights_buf = vertex_weights_array.request();
     auto vertex_weights_ptr = static_cast<double*>(vertex_weights_buf.ptr);
 
+    #pragma omp parallel for schedule(dynamic, 2048)
     for (size_t i = 0; i < n_vertices; ++i) {
         vertex_weights_ptr[i] = result.vertexWeight[i];
     }
@@ -167,6 +210,7 @@ py::dict leiden_result_to_dict(const LeidenResult<K, W>& result) {
     auto community_weights_buf = community_weights_array.request();
     auto community_weights_ptr = static_cast<double*>(community_weights_buf.ptr);
 
+    #pragma omp parallel for schedule(dynamic, 2048)
     for (size_t i = 0; i < n_communities; ++i) {
         community_weights_ptr[i] = result.communityWeight[i];
     }

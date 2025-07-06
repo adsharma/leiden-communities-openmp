@@ -200,8 +200,8 @@ def benchmark_algorithms(graph_data=None, num_iterations=3):
     lc_leiden_modularity = calculate_modularity_from_result(
         sources, targets, weights, lc_leiden_result
     )
-    lc_leiden_communities = len(lc_leiden_result["communities"])
-    print(f"  Communities found: {lc_leiden_communities:.6f}")
+    lc_leiden_communities = lc_leiden_result["vertices"]["community"].nunique()
+    print(f"  Communities found: {lc_leiden_communities}")
     print(f"  Modularity: {lc_leiden_modularity:.6f}")
     print()
 
@@ -230,7 +230,7 @@ def benchmark_algorithms(graph_data=None, num_iterations=3):
     # Calculate modularity
     nk_leiden_modularity = calculate_modularity_networkit(nk_graph, nk_leiden_result)
     nk_leiden_communities = nk_leiden_result.numberOfSubsets()
-    print(f"  Communities found: {nk_leiden_communities:.6f}")
+    print(f"  Communities found: {nk_leiden_communities}")
     print(f"  Modularity: {nk_leiden_modularity:.6f}")
     print()
 
@@ -256,7 +256,7 @@ def benchmark_algorithms(graph_data=None, num_iterations=3):
         f"  leiden-communities-openmp Leiden:  {lc_leiden_communities} communities, modularity {lc_leiden_modularity:.6f}"
     )
     print(
-        f"  NetworkIt Leiden:                  {nk_leiden_communities} communities, modularity {nk_leiden_modularity}"
+        f"  NetworkIt Leiden:                  {nk_leiden_communities} communities, modularity {nk_leiden_modularity:.6f}"
     )
     print()
 
